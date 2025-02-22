@@ -1,4 +1,41 @@
 --------------------------------------------------------------------------------
+-- Helper: Pre-process HTML content to clean up formatting.
+on preProcessHTML(filePath)
+	try
+		-- Read the file contents.
+		set fileContent to read (POSIX file filePath) as «class utf8»
+		
+		-- Step 1: Globally collapse any repeated <br> tags.
+		repeat while fileContent contains "<br><br>"
+			set fileContent to my replaceText(fileContent, "<br><br>", "<br>")
+		end repeat
+		
+		-- Also collapse patterns like "<br> <br>" if they exist.
+		repeat while fileContent contains "<br> <br>"
+			set fileContent to my replaceText(fileContent, "<br> <br>", "<br>")
+		end repeat
+		
+		-- Collapse consecutive <div><br></div> blocks into one.
+		repeat while fileContent contains "<div><br></div>
+<div><br></div>"
+			set fileContent to my replaceText(fileContent, "<div><br></div>
+<div><br></div>", "<div><br></div>")
+		end repeat
+		
+		-- Write the cleaned content back to the file.
+		set fileRef to open for access (POSIX file filePath) with write permission
+		set eof of fileRef to 0
+		write fileContent to fileRef as «class utf8»
+		close access fileRef
+	on error errClean
+		try
+			close access (POSIX file filePath)
+		end try
+		display dialog "Error cleaning file: " & errClean buttons {"OK"} default button 1
+	end try
+end preProcessHTML
+
+--------------------------------------------------------------------------------
 -- Helper: Replace occurrences of a substring in a text string.
 on replaceText(theText, searchString, replacementString)
 	set AppleScript's text item delimiters to searchString
@@ -8,6 +45,50 @@ on replaceText(theText, searchString, replacementString)
 	set AppleScript's text item delimiters to ""
 	return newText
 end replaceText
+
+--------------------------------------------------------------------------------
+-- New Helper: Wrap the exported raw HTML with a complete HTML header.
+-- This handler reads the current file (which contains the raw note export),
+-- then creates a new HTML structure, replacing:
+--   - EXISTING_HTML_EXPORT_FROM_APPLE_NOTE with the raw content.
+--   - All APPLE_NOTE_TITLE placeholders with the provided noteTitle.
+-- Additional parameters (hostUrl, postUrl, imageUrl) are used in meta tags.
+on wrapHTML(filePath, noteTitle, hostUrl, postUrl, imageUrl)
+	try
+		-- Read the current exported (raw) HTML.
+		set existingContent to read (POSIX file filePath) as «class utf8»
+		
+		-- Build the complete HTML template.
+		set newHTML to "<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"UTF-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+  <meta property=\"og:title\" content=\"" & noteTitle & "\" />
+  <meta property=\"og:url\" content=\"" & hostUrl & postUrl & "\" />
+  <meta property=\"og:image\" content=\"" & imageUrl & "\" />
+  <style type=\"text/css\">
+    /* Insert your CSS styling here */
+  </style>
+  <title>" & noteTitle & "</title>
+</head>
+<body>
+  " & existingContent & "
+</body>
+</html>"
+		
+		-- Write the wrapped content back to the file.
+		set fileRef to open for access (POSIX file filePath) with write permission
+		set eof of fileRef to 0
+		write newHTML to fileRef as «class utf8»
+		close access fileRef
+	on error errWrap
+		try
+			close access (POSIX file filePath)
+		end try
+		display dialog "Error wrapping HTML: " & errWrap buttons {"OK"} default button 1
+	end try
+end wrapHTML
 
 --------------------------------------------------------------------------------
 tell application "Notes"
@@ -87,19 +168,26 @@ tell application "Notes"
 			end try
 			if (count of attList) > 0 then
 				repeat with anAtt in attList
-					set attName to name of anAtt
-					-- Convert to lower case for extension testing.
-					set lowerName to do shell script "echo " & quoted form of attName & " | tr '[:upper:]' '[:lower:]'"
-					if lowerName ends with ".webm" or lowerName ends with ".mp4" or lowerName ends with ".mov" then
-						set extraHTML to extraHTML & "<video src=\"attachments/" & attName & "\" controls>" & return & "  <p>" & return & "    Your browser doesn't support HTML video. Here is a" & return & "    <a href=\"attachments/" & attName & "\">link to the video</a> instead." & return & "  </p>" & return & "</video>" & return
-					else if lowerName ends with ".ogg" then
-						set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/ogg\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
-					else if lowerName ends with ".mp3" then
-						set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/mpeg\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
-					else if lowerName ends with ".m4a" then
-						set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/mp4\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
-					else if lowerName ends with ".pdf" then
-						set extraHTML to extraHTML & "<p><a href=\"attachments/" & attName & "\">" & attName & "</a></p>" & return
+					-- Get the attachment name; if missing, skip this attachment.
+					try
+						set attName to name of anAtt
+					on error
+						set attName to ""
+					end try
+					if attName is not missing value and attName ≠ "" then
+						-- Convert to lower case for extension testing.
+						set lowerName to do shell script "echo " & quoted form of attName & " | tr '[:upper:]' '[:lower:]'"
+						if lowerName ends with ".webm" or lowerName ends with ".mp4" or lowerName ends with ".mov" then
+							set extraHTML to extraHTML & "<video src=\"attachments/" & attName & "\" controls>" & return & "  <p>" & return & "    Your browser doesn't support HTML video. Here is a" & return & "    <a href=\"attachments/" & attName & "\">link to the video</a> instead." & return & "  </p>" & return & "</video>" & return
+						else if lowerName ends with ".ogg" then
+							set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/ogg\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
+						else if lowerName ends with ".mp3" then
+							set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/mpeg\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
+						else if lowerName ends with ".m4a" then
+							set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/mp4\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
+						else if lowerName ends with ".pdf" then
+							set extraHTML to extraHTML & "<p><a href=\"attachments/" & attName & "\">" & attName & "</a></p>" & return
+						end if
 					end if
 				end repeat
 			end if
@@ -157,29 +245,13 @@ tell application "Notes"
 			end try
 			
 			--------------------------------------------------------------------------------
-			-- Now polish the HTML file:
-			-- (1) Replace multiple consecutive <br> tags with a single <br>
-			-- (2) If there are consecutive rows exactly matching "<div><br><div>" (separated by a newline), reduce them to one.
-			try
-				-- Read the file contents.
-				set fileContent to read (POSIX file filePath) as «class utf8»
-				
-				-- Step 1: Replace occurrences of "<br><br>" with "<br>" repeatedly.
-				repeat while fileContent contains "<br><br>"
-					set fileContent to my replaceText(fileContent, "<br><br>", "<br>")
-				end repeat
-				
-				-- Write the cleaned content back to the file.
-				set fileRef to open for access (POSIX file filePath) with write permission
-				set eof of fileRef to 0
-				write fileContent to fileRef as «class utf8»
-				close access fileRef
-			on error errClean
-				try
-					close access (POSIX file filePath)
-				end try
-				display dialog "Error cleaning file: " & errClean buttons {"OK"} default button 1
-			end try
+			-- Polish the HTML file.
+			my preProcessHTML(filePath)
+			
+			--------------------------------------------------------------------------------
+			-- Wrap the polished HTML with a complete header.
+			-- (Adjust hostUrl, postUrl, and imageUrl as needed.)
+			my wrapHTML(filePath, noteTitle, "http://example.com/", "/notes/" & baseFileName, "http://example.com/firstImage.jpg")
 			
 			--------------------------------------------------------------------------------
 			-- Export attachments (if any) into an "attachments" subfolder.
@@ -188,7 +260,25 @@ tell application "Notes"
 					set attDir to dirPath & "attachments/"
 					do shell script "mkdir -p " & quoted form of attDir
 					repeat with anAtt in attList
-						set attName to name of anAtt
+						try
+							set attName to name of anAtt
+							if attName is missing value or attName is "" then set attName to "Attachment"
+						on error errMsg
+							set attName to "Attachment"
+						end try
+						set lowerName to do shell script "echo " & quoted form of attName & " | tr '[:upper:]' '[:lower:]'"
+						if lowerName ends with ".webm" or lowerName ends with ".mp4" or lowerName ends with ".mov" then
+							set extraHTML to extraHTML & "<video src=\"attachments/" & attName & "\" controls>" & return & "  <p>" & return & "    Your browser doesn't support HTML video. Here is a" & return & "    <a href=\"attachments/" & attName & "\">link to the video</a> instead." & return & "  </p>" & return & "</video>" & return
+						else if lowerName ends with ".ogg" then
+							set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/ogg\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
+						else if lowerName ends with ".mp3" then
+							set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/mpeg\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
+						else if lowerName ends with ".m4a" then
+							set extraHTML to extraHTML & "<audio controls>" & return & "  <source src=\"attachments/" & attName & "\" type=\"audio/mp4\">" & return & "  Your browser does not support the audio tag." & return & "</audio>" & return
+						else if lowerName ends with ".pdf" then
+							set extraHTML to extraHTML & "<p><a href=\"attachments/" & attName & "\">" & attName & "</a></p>" & return
+						end if
+						
 						set attFilePath to attDir & attName
 						try
 							save anAtt in (POSIX file attFilePath)
@@ -198,6 +288,7 @@ tell application "Notes"
 					end repeat
 				end if
 			end try
+			
 		end if
 	end repeat
 	
