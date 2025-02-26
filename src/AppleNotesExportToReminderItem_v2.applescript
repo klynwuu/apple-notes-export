@@ -2,6 +2,28 @@
 -- using NoteStore.sqlite to retrieve the real note identifier for the deep link.
 -- The deep link is appended as a new line to the reminder‚Äôs body.
 
+-- Helper function to trim whitespace
+on trim(theText)
+    set whitespace to {" ", tab, return, linefeed}
+    repeat while theText begins with whitespace
+        set theText to text 2 thru -1 of theText
+    end repeat
+    repeat while theText ends with whitespace
+        set theText to text 1 thru -2 of theText
+    end repeat
+    return theText
+end trim
+
+-- Helper function to replace line breaks with space
+on replaceLineBreaksWithSpace(theText)
+    set AppleScript's text item delimiters to {return, linefeed}
+    set textItems to text items of theText
+    set AppleScript's text item delimiters to " "
+    set theText to textItems as string
+    set AppleScript's text item delimiters to ""
+    return theText
+end replaceLineBreaksWithSpace
+
 tell application "Notes"
 	activate
 	set selectedNotes to selection
@@ -11,42 +33,47 @@ tell application "Notes"
 	end if
 	
 	set theNote to item 1 of selectedNotes
-	-- Bring the note to a separate window so the user sees which note will be used
-	show theNote with separately
-	
-	-- Use the note's title (its first row) as the reminder title
-	set noteTitle to name of theNote
-	
-	-- Get the note‚Äôs full plain text content and extract its second line
-	set noteContent to plaintext of theNote
-	set noteParagraphs to paragraphs of noteContent
-	if (count of noteParagraphs) >= 2 then
-		set secondLine to item 2 of noteParagraphs
-	else
-		set secondLine to ""
-	end if
-	
-	-- Extract the first 100 characters from the second line (or all if shorter)
-	if (length of secondLine) > 100 then
-		set shortContent to text 1 thru 100 of secondLine
-	else
-		set shortContent to secondLine
-	end if
-	
-	-- Retrieve the note's unique identifier (a Core Data URL)
-	set noteIdentifierURL to id of theNote
-end tell
+  show theNote with separately
+  set noteTitle to name of theNote
+  set noteContent to plaintext of theNote
+  set noteParagraphs to paragraphs of noteContent
 
--- Process the noteIdentifierURL to extract the internal primary key (e.g. from "p2405")
+  -- Step 1: Start from the 2nd line
+  set noteContentRaw to ""
+  if (count of noteParagraphs) ≥ 2 then
+      repeat with i from 2 to count of noteParagraphs
+          set noteContentRaw to noteContentRaw & item i of noteParagraphs & linefeed
+          if (length of noteContentRaw) ≥ 1000 then exit repeat
+      end repeat
+  end if
+
+  -- Step 2: Trim leading & trailing spaces
+  set noteContentRaw to my trim(noteContentRaw)
+
+  -- Step 3: Replace line breaks with space
+  set noteContentRaw to my replaceLineBreaksWithSpace(noteContentRaw)
+
+  -- Step 4: Extract first 144 characters for shortContent
+  if (length of noteContentRaw) > 144 then
+      set shortContent to text 1 thru 144 of noteContentRaw
+  else
+      set shortContent to noteContentRaw
+  end if
+
+  -- Retrieve the note's unique identifier
+  set noteIdentifierURL to id of theNote
+end tell  -- Closing Notes app `tell` block
+
+-- Process the noteIdentifierURL to extract the internal primary key
 set oldDelims to text item delimiters
 set text item delimiters to "/"
 set urlItems to text items of noteIdentifierURL
 set text item delimiters to oldDelims
 set lastItem to last item of urlItems
 if (length of lastItem) > 1 then
-	set internalPK to text 2 thru -1 of lastItem
+  set internalPK to text 2 thru -1 of lastItem
 else
-	set internalPK to lastItem
+  set internalPK to lastItem
 end if
 
 -- Query the NoteStore.sqlite database to get the real note identifier (UUID)
