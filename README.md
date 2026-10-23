@@ -2,9 +2,41 @@
 
 Code base enhanced from [notes-export/notesExport.applescript at master · robertgaal/notes-export](https://github.com/robertgaal/notes-export/blob/master/notesExport.applescript)
 
-## Enhancedments
+| Script | Purpose |
+|---|---|
+| `src/AppleNotesExportToHTMLOrMD_v2.applescript` | **Current.** Folders → HTML or Markdown, nested folders mirrored, inline images extracted |
+| `src/AppleNotesExportToHTMLOrMD_v1.applescript` | Previous HTML/Markdown exporter (kept for reference) |
+| `src/AppleNotesExportToHTML_v3.applescript` | HTML-only predecessor, guide below |
+| `src/AppleNotesExportToReminderItem_v1/v2.applescript` | Selected note → Reminder with a deep link, guide below |
 
-added selection on folder level and individual notes
+## Exporter v2 (checked on macOS 27.0.1)
+
+Open `src/AppleNotesExportToHTMLOrMD_v2.applescript` in Script Editor and run it, or run
+`osascript src/AppleNotesExportToHTMLOrMD_v2.applescript`. Pick folders (shown as paths, subfolders
+included), HTML or Markdown, and an output folder. The first run asks to let Script Editor (or your
+terminal) control Notes.
+
+```
+Output/
+├── Work/
+│   ├── Weekly Review.md
+│   ├── Weekly Review (2).md          # same title, no longer overwritten
+│   └── attachments/Weekly Review/image-1.png
+└── Work/Clients/Brief.md
+```
+
+What changed from v1:
+
+- Folders are listed by path, so two folders with the same name can be told apart; nested folders keep their place.
+- Folder paths come from one pass over the folder tree instead of walking every note's container (about 1 s per note on a large account).
+- Inline images, which Notes keeps as `data:` URIs in the body, are written to `attachments/<note>/image-N.ext` and linked. v1 relied on `save attachment`, which fails on macOS 27, so its attachment links pointed at files that were never written.
+- Notes with the same title no longer overwrite each other.
+- Markdown mode converts headings, bold/italic/strikethrough, monospaced text, nested and numbered lists, links, images and tables instead of leaving HTML tags in the file.
+- A failing note is listed in the final report instead of stopping the run with a dialog; Recently Deleted is skipped.
+
+Limits on macOS 27: attachments that are not inline images (PDF, audio, drawings, scans, link cards) cannot be extracted by script; checklists export as plain list items. For a complete single-note export use Notes > Share > Export as Markdown (new in macOS 27), which writes every attachment to an `Attachments` folder.
+
+For agents and the command line, the `apple-notes` skill in the OPC SKILLs repo (`agentic-tools/SKILLs/apple-notes/scripts/notes.py`) searches, reads, writes and exports notes with a stricter HTML ↔ Markdown converter.
 
 ## how to Run `AppleNotesExportToHTML_v3.applescript`
 
